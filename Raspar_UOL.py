@@ -2,44 +2,39 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime
-import sqlite3
+import boto3
+import os
 
+# Inicializando o Cliente s3
+s3 = boto3.client('s3')
+bucket_name = 'FALTA CRIAR BUCKET'
 
+# Cria ou atualiza um arquivo CSV no S3
+def cria_arquivo(titulo_texto, data_coleta):
+    # Verifica se o arquivo já existe
+    try:
+       # Busca o arquivo para inserir novos dados
+        response = s3.get_object(Bucket = bucket_name, key ='titulos.csv')
+        df = pd.read_csv(response['body'])
+    except s3.exceptions.NoSuchKey:
+        #Caso não exista o arquivo, cria.
+        df = pd.DataFrame(columns=['titulo', 'data_coleta'])
 
-def cria_tabela():
-    # Conectar ao banco de dados (ou criar se não existir)
-    conn = sqlite3.connect('titulos_uol.db')
-    cursor = conn.cursor()
+    # Adiciona uma nova linha com os dados coletados
+    nova_linha = pd.DataFrame([[titulo_texto, data_coleta]], columns=['titulo', 'data_coleta'])
+    df = pd.concat([df, nova_linha], ignore_index=True)
 
-    # Criar tabela se não existir
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS titulos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        titulo TEXT NOT NULL,
-        data_coleta TEXT NOT NULL
-    )
-    ''')
-    conn.commit()
-    conn.close()
+    # Salva o DataFrame como um arquivo CSV localmente
+    df.to_csv('/tmp/titulos.csv', index=False)
 
+    # Faz upload do arquivo CSV para o S3
+    s3.upload_file('/tmp/titulos.csv', bucket_name, 'titulos.csv')
 
-def insere_titulo(titulo_texto, data_coleta):
-    # Conectar ao banco de dados
-    conn = sqlite3.connect('titulos_uol.db')
-    cursor = conn.cursor()
-
-    # Inserir o título e a data de coleta na tabela
-    cursor.execute('''
-    INSERT INTO titulos (titulo, data_coleta) VALUES (?, ?)
-    ''', (titulo_texto, data_coleta))
-
-    conn.commit()
-    conn.close()
 
 
 def coleta_titulo():
-    url = 'https://uol.com.br'
 
+    url = 'https://uol.com.br'
     response = requests.get(url)
     soup = BeautifulSoup(response.content, 'html.parser')
 
@@ -54,9 +49,9 @@ def coleta_titulo():
         #Data da coleta
         data_coleta = datetime.now().strftime('%Y-%m-%d %H:%M')  # Formato ano-mes-dia hora-minuto
 
-        # insere os dados na tabela SQLite
-        insere_titulo(titulo_texto, data_coleta)
+        # insere os dados no arquivo CSV no S3
+        cria_arquivo(titulo_texto, data_coleta)
 
 
-cria_tabela()
-coleta_titulo()
+def lambda_handler(event, context):
+    coleta_titulo()
